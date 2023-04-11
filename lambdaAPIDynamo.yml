@@ -1,0 +1,129 @@
+# Working
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamoDB = new AWS.DynamoDB.DocumentClient();
+          exports.handler = async (event) => {
+            let operation = event.operation;
+            let params = event.params;
+            switch (operation) {
+              case 'create':
+                return createItem(params);
+              case 'read':
+                return readItem(params);
+              case 'update':
+                return updateItem(params);
+              case 'delete':
+                return deleteItem(params);
+              default:
+                throw new Error(`Unrecognized operation "${operation}"`);
+            }
+          };
+          function createItem(params) {
+            return dynamoDB.put(params).promise();
+          }
+          function readItem(params) {
+            return dynamoDB.get(params).promise();
+          }
+          function updateItem(params) {
+            return dynamoDB.update(params).promise();
+          }
+          function deleteItem(params) {
+            return dynamoDB.delete(params).promise();
+          }
+      FunctionName:
+        Ref: LambdaFuncName
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::293048113990:role/LabRole
+    DependsOn:
+      - DynamoDBTable
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName:
+        Ref: DynamoDBTableName
+      AttributeDefinitions:
+        - AttributeName: todoId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: todoId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+    # Role: arn:aws:iam::293048113990:role/LabRole
+    # DependsOn:
+    #   - Role: arn:aws:iam::293048113990:role/LabRole
+  APIGatewayRestAPI:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name:
+        Ref: APIName
+    DependsOn:
+      - LambdaFunction
+  APIGatewayResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart:
+        Ref: LambdaFuncName
+    DependsOn:
+      - APIGatewayRestAPI
+  APIGatewayMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
+          - LambdaFuncNameArn: !GetAtt LambdaFunction.Arn
+    DependsOn:
+      - APIGatewayResource
+  APIGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName:
+        Ref: EnvironmentName
+    DependsOn:
+      - APIGatewayMethod
+  APIGatewayPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+Parameters:
+  LambdaFuncName:
+    Type: String
+    Default: Lambda_api-lambda-db
+  DynamoDBTableName:
+    Type: String
+    Default: TODO_dB
+  APIName:
+    Type: String
+    Default: TODO_API_GATEWAY
+  EnvironmentName:
+    Type: String
+    Default: Prod
