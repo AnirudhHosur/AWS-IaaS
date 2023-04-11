@@ -1,0 +1,179 @@
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  TodoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TodoTable
+      AttributeDefinitions:
+        - AttributeName: UserId
+          AttributeType: S
+        - AttributeName: TaskId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: UserId
+          KeyType: HASH
+        - AttributeName: TaskId
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+  
+  GetAllTodosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetAllTodosFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri: src/
+      MemorySize: 256
+      Timeout: 10
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TodoTable
+      Events:
+        GetAllTodosApiEvent:
+          Type: Api
+          Properties:
+            Path: /todos
+            Method: get
+            RestApiId: !Ref TodoApi
+
+  GetTodoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetTodoFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri: src/
+      MemorySize: 256
+      Timeout: 10
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TodoTable
+      Events:
+        GetTodoApiEvent:
+          Type: Api
+          Properties:
+            Path: /todos/{id}
+            Method: get
+            RestApiId: !Ref TodoApi
+
+  CreateTodoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CreateTodoFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri: src/
+      MemorySize: 256
+      Timeout: 10
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TodoTable
+      Events:
+        CreateTodoApiEvent:
+          Type: Api
+          Properties:
+            Path: /todos
+            Method: post
+            RestApiId: !Ref TodoApi
+
+  UpdateTodoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: UpdateTodoFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri: src/
+      MemorySize: 256
+      Timeout: 10
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TodoTable
+      Events:
+        UpdateTodoApiEvent:
+          Type: Api
+          Properties:
+            Path: /todos/{id}
+            Method: put
+            RestApiId: !Ref TodoApi
+
+  DeleteTodoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DeleteTodoFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
+      CodeUri: src/
+      MemorySize: 256
+      Timeout: 10
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TodoTable
+      Events:
+        DeleteTodoApiEvent:
+          Type: Api
+          Properties:
+            Path: /todos/{id}
+            Method: delete
+            RestApiId: !Ref TodoApi
+
+  TodoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: TodoApi
+      StageName: prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: Todo API
+          version: '1.0'
+        paths:
+          /todos/{id}:
+            delete:
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteTodoFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: '200 response'
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                  schema:
+                    type: string
+          /:
+            get:
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAllTodosFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: '200 response'
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                  schema:
+                    type: string
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateTodoFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: '200 response'
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: string
+                  schema:
+                    type: string
