@@ -1,0 +1,20 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: todoId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: todoId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableName: todoYML
+
+Outputs:
+  UserTableTest:
+    Description: User table created with this template
+    Value: !Ref MyDynamoDBTable
