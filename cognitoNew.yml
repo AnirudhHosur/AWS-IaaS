@@ -1,0 +1,802 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  ConfirmUserFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: ConfirmUserFunction
+      Runtime: nodejs14.x
+      Handler: index.handler
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const cognito = new AWS.CognitoIdentityServiceProvider({ region: 'us-east-1' });
+
+          exports.handler = async (event, context) => {
+            const params = {
+              UserPoolId: process.env.USER_POOL_ID,
+              Username: event.username
+            };
+            
+            try {
+              await cognito.adminConfirmSignUp(params).promise();
+              return { message: 'User email address confirmed successfully' };
+            } catch (err) {
+              console.error(err);
+              throw new Error('Error confirming user email address');
+            }
+          };
+      Timeout: 10
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPool
+
+  SubscribeForSNS:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: SubscribeForSNS
+      Runtime: nodejs14.x
+      Handler: index.handler
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const sns = new AWS.SNS();
+          exports.handler = async (event) => {
+              const email = event.email; 
+              const topicArn = process.env.SNS_TOPIC_ARN
+              const params = {
+                  Protocol: 'email',
+                  TopicArn: topicArn,
+                  Endpoint: email
+              };
+              try {
+                  const result = await sns.subscribe(params).promise();
+                  console.log('Subscribed successfully:', result);
+              } catch (error) {
+                  console.error('Failed to subscribe:', error);
+              }
+              return { statusCode: 200 };
+          };
+      Timeout: 10
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref MySNSTopicCreate
+    DependsOn: MySNSTopicCreate
+
+  LambdaFunctionGet:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamodb = new AWS.DynamoDB.DocumentClient();
+          const tableName = 'TodoTableCognito';
+          exports.handler = async function(event) {
+            console.log("The incoming event", event)
+            const userId = event.ExpressionAttributeValues[':userId'].S;
+            console.log("The userId I am taking", userId)
+            const params = {
+              TableName: tableName,
+              KeyConditionExpression: 'userId = :userId',
+              ExpressionAttributeValues: {
+                ':userId': userId
+              }
+            };
+            try {
+              const data = await dynamodb.query(params).promise();
+              const response = {
+                statusCode: 200,
+                body: JSON.stringify(data),
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              };
+              return response
+            } catch (err) {
+              console.error('Error:', err);
+              throw err;
+            }
+          };
+      FunctionName:
+        Ref: LambdaFuncNameGet
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::293048113990:role/LabRole
+    DependsOn:
+      - DynamoDBTable
+
+  LambdaFunctionPut:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamodb = new AWS.DynamoDB.DocumentClient();
+          const tableName = 'TodoTableCognito';
+
+          exports.handler = async function(event, context) {
+            // const userId = event.ExpressionAttributeValues[':userId'].S;
+            // const taskId = event.ExpressionAttributeValues[':taskId'].S;
+            // const title = event.ExpressionAttributeValues[':title'].S;
+            const userId = event.userId
+            const taskId = event.taskId
+            const title = event.title
+            console.log(userId, taskId, title)
+            const params = {
+              TableName: tableName,
+              Key: {
+                userId: userId,
+                taskId: taskId
+              },
+              UpdateExpression: 'set title = :t',
+              ExpressionAttributeValues: {
+                ':t': title
+              },
+            };
+            console.log(params, "Paramsssss")
+            try {
+              console.log("entering try")
+              await dynamodb.update(params).promise();
+              return {
+                statusCode: 200,
+                body: JSON.stringify({ message: "Todo updated successfully" }),
+              }
+            } catch (err) {
+              return {
+              statusCode: 500,
+              body: JSON.stringify({
+                message: "Error updating todo item",
+                error: err.message
+              })
+            }
+            }
+          };
+      FunctionName:
+        Ref: LambdaFuncNamePut
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::293048113990:role/LabRole
+    DependsOn:
+      - DynamoDBTable
+
+  LambdaFunctionDelete:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamodb = new AWS.DynamoDB.DocumentClient();
+
+          const tableName = 'TodoTableCognito';
+
+          exports.handler = async (event) => {
+            console.log(event, "Hello")
+            // const userId = event.ExpressionAttributeValues[':userId'].S;
+            // const taskId = event.ExpressionAttributeValues[':taskId'].S;
+            const userId = event.userId
+            const taskId = event.taskId
+            console.log(userId, taskId, "HEREEEE")
+            const params = {
+              TableName: tableName,
+              Key: {
+                userId,
+                taskId
+              }
+            };
+            try {
+              const result = await dynamodb.delete(params).promise();
+              console.log('Item deleted successfully:', result);
+              return {
+                statusCode: 200,
+                body: JSON.stringify({ message: "Todo deleted successfully" }),
+              };
+            } catch (err) {
+              console.log('Error deleting item:', err);
+              return {
+                statusCode: 500,
+                body: JSON.stringify({
+                  message: "Error deleting todo item",
+                  error: err.message
+                })
+              };
+            }
+          };
+      FunctionName:
+        Ref: LambdaFuncNameDelete
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::293048113990:role/LabRole
+    DependsOn:
+      - DynamoDBTable
+
+  LambdaFunctionCreate:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const dynamodb = new AWS.DynamoDB.DocumentClient();
+          const dynamodbTableName = 'TodoTableCognito';
+          const sns = new AWS.SNS();
+
+          exports.handler = async function(event) {
+              console.log('Request event: ', event);
+              let response;
+              response = await saveProduct(event);
+              return response;
+          }
+            
+          async function saveProduct(requestBody) {
+            const params = {
+              TableName: dynamodbTableName,
+              Item: requestBody
+            }
+            try {
+              await dynamodb.put(params).promise();
+              console.log("Item saved to dB")
+              const message = "A new task has been created"
+              const snsParams = {
+                TopicArn: process.env.SNS_TOPIC_ARN,
+                Message: message
+              }
+              await sns.publish(snsParams).promise();
+              console.log("Notification has been sent")
+              return { body: 'Successfully created item!' }
+            } catch (err) {
+              return { error: err }
+            }
+          }
+      FunctionName:
+        Ref: LambdaFuncNameCreate
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::293048113990:role/LabRole
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref MySNSTopicCreate
+    DependsOn:
+      - DynamoDBTable
+      - MySNSTopicCreate
+
+  MySNSTopicCreate:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: My SNS Topic Create
+      TopicName: create-task-sns
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "userId"
+          AttributeType: "S"
+        - AttributeName: "taskId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "userId"
+          KeyType: "HASH"
+        - AttributeName: "taskId"
+          KeyType: "RANGE"
+      BillingMode: "PAY_PER_REQUEST"
+      TableName: "TodoTableCognito"
+      TimeToLiveSpecification:
+        AttributeName: "expirationDate"
+        Enabled: true
+  
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: LatestPoolCognito
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes: 
+        - email
+      Schema:
+        - Name: given_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+          StringAttributeConstraints:
+            MinLength: "1"
+            MaxLength: "50"
+        - Name: family_name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+          StringAttributeConstraints:
+            MinLength: "1"
+            MaxLength: "50"
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: MyAppClient
+      GenerateSecret: false
+      RefreshTokenValidity: 30
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - phone
+        - profile
+        - aws.cognito.signin.user.admin
+      CallbackURLs:
+        - https://example.com/callback
+      LogoutURLs:
+        - https://example.com/logout
+
+  # CognitoUserPoolDomain:
+  #   Type: AWS::Cognito::UserPoolDomain
+  #   Properties:
+  #     Domain: domainexample
+  #     UserPoolId: !Ref UserPool
+
+  Authorizer:
+    Type: 'AWS::ApiGateway::Authorizer'
+    Properties:
+      Name: "my-authorizer"
+      Type: "COGNITO_USER_POOLS"
+      RestApiId: !Ref APIGatewayRestAPI
+      IdentitySource: "method.request.header.Authorization"
+      ProviderARNs:
+        - !GetAtt UserPool.Arn
+      AuthorizerResultTtlInSeconds: 300
+
+  APIGatewayRestAPI:
+  # API Gateway
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name:
+        Ref: APIName
+
+  APIGatewayResource:
+  # API Gateway Resource
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart: todo
+    DependsOn:
+      - APIGatewayRestAPI
+
+  APIGatewayResourceAuth:
+  # API Gateway Resource
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart: auth
+    DependsOn:
+      - APIGatewayRestAPI
+
+  APIGatewayResourceSNSEmail:
+  # API Gateway Resource
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart: sns
+    DependsOn:
+      - APIGatewayRestAPI
+
+  APIGatewayMethodSNSEmail:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref APIGatewayResourceSNSEmail
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubscribeForSNS.Arn}/invocations'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{"body": $input.json("$")}'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '400'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '500'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true  
+    DependsOn:
+      - APIGatewayResourceSNSEmail
+
+  APIGatewayMethodAuth:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref APIGatewayResourceAuth
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConfirmUserFunction.Arn}/invocations'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{"body": $input.json("$")}'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '400'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '500'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true  
+    DependsOn:
+      - APIGatewayResourceAuth
+  
+  APIGatewayMethodGet:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      ResourceId: !Ref APIGatewayResource
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref Authorizer
+      HttpMethod: GET
+      Integration:
+        IntegrationHttpMethod: 'POST'
+        Type: AWS
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionGet.Arn}/invocations'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: >
+            {
+              "KeyConditionExpression": "userId = :userId",
+              "ExpressionAttributeValues": {
+                ":userId": {
+                  "S": "$input.params('userId')"
+                }
+              }
+            }
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseTemplates:
+            application/json: |
+              #set($inputRoot = $input.path('$'))
+              $inputRoot.body
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+        - StatusCode: '400'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+    DependsOn:
+      - APIGatewayResource
+      # ResourceId: !Ref APIGatewayResource
+      # RestApiId: !Ref APIGatewayRestAPI
+
+  APIGatewayMethodPost:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref APIGatewayResource
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref Authorizer
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionCreate.Arn}/invocations'
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: '{"body": $input.json("$")}'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '400'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '500'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true  
+    DependsOn:
+      - APIGatewayResource   
+      # ResourceId: !Ref APIGatewayResource
+      # RestApiId: !Ref APIGatewayRestAPI
+
+  APIGatewayMethodPut:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: PUT
+      ResourceId: !Ref APIGatewayResource
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref Authorizer
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionPut.Arn}/invocations'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '400'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+          - StatusCode: '500'
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+    DependsOn:
+      - APIGatewayResource
+      # ResourceId: !Ref APIGatewayResource
+      # RestApiId: !Ref APIGatewayRestAPI
+
+  APIGatewayMethodDelete:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: DELETE
+      ResourceId: !Ref APIGatewayResource
+      RestApiId: !Ref APIGatewayRestAPI
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref Authorizer
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionDelete.Arn}/invocations'
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseTemplates:
+            application/json: '{"body": $input.json("$")}'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,token'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,PUT,DELETE,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+        - StatusCode: '400'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '400'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+        - StatusCode: '500'
+          ResponseModels:
+            application/json: 'Empty'
+          ResponseParameters:
+            method.response.header.Content-Type: "'application/json'"
+            method.response.header.Access-Control-Allow-Origin: true
+    DependsOn:
+      - APIGatewayResource
+      # ResourceId: !Ref APIGatewayResource
+      # RestApiId: !Ref APIGatewayRestAPI
+
+  APIGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName:
+        Ref: EnvironmentName
+    DependsOn:
+      - APIGatewayMethodSNSEmail
+      - APIGatewayMethodAuth
+      - APIGatewayMethodPost
+      - APIGatewayMethodGet
+      - APIGatewayMethodPut
+      - APIGatewayMethodDelete
+
+  APIGatewayPermissionSNSEmail:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt SubscribeForSNS.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  APIGatewayPermissionAuth:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt ConfirmUserFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  APIGatewayPermissionCreate:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunctionCreate.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  APIGatewayPermissionUpdate:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunctionPut.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  APIGatewayPermissionDelete:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunctionDelete.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  APIGatewayPermissionRead:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LambdaFunctionGet.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+Parameters:
+  LambdaFuncNameGet:
+    Type: String
+    Default: lambda_COGNITO_Get
+  LambdaFuncNamePut:
+    Type: String
+    Default: lambda_COGNITO_Put
+  LambdaFuncNameDelete:
+    Type: String
+    Default: lambda_COGNITO_Delete
+  LambdaFuncNameCreate:
+    Type: String
+    Default: lambda_COGNITO_Create
+  DynamoDBTableName:
+    Type: String
+    Default: TodoTableCognito
+  APIName:
+    Type: String
+    Default: TODO_API_GATEWAY_COGNITO
+  EnvironmentName:
+    Type: String
+    Default: Prod
